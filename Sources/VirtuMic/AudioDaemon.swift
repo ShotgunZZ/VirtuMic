@@ -4,8 +4,15 @@ import AudioToolbox
 
 final class AudioDaemon {
     private let config: AudioConfig
-    private let engine = AVAudioEngine()
-    private var aggregateDeviceID: AudioDeviceID = 0
+    private let inputEngine = AVAudioEngine()
+    private let outputEngine = AVAudioEngine()
+
+    // Lock-free ring buffer for passing audio between engines
+    private var ringBuffer: UnsafeMutablePointer<Float>?
+    private let ringBufferFrames = 88200 // 2 seconds at 44100
+    private var writePos = 0
+    private var readPos = 0
+    private let bufferLock = NSLock()
 
     init(config: AudioConfig) {
         self.config = config
@@ -15,45 +22,45 @@ final class AudioDaemon {
         // 1. Find devices
         print("Looking for input device: '\(config.inputDevice)'...")
         let inputDevice = try DeviceManager.findDevice(matching: config.inputDevice, needsInput: true, needsOutput: false)
-        print("  Found: \(inputDevice.name) (UID: \(inputDevice.uid))")
+        print("  Found: \(inputDevice.name)")
 
         print("Looking for output device: '\(config.outputDevice)'...")
         let outputDevice = try DeviceManager.findDevice(matching: config.outputDevice, needsInput: false, needsOutput: true)
-        print("  Found: \(outputDevice.name) (UID: \(outputDevice.uid))")
+        print("  Found: \(outputDevice.name)")
 
-        // 2. Create aggregate device
-        print("Creating aggregate device...")
-        aggregateDeviceID = try DeviceManager.createAggregateDevice(
-            inputUID: inputDevice.uid,
-            outputUID: outputDevice.uid
-        )
-        print("  Aggregate device created (ID: \(aggregateDeviceID))")
+        // 2. Set input engine to read from USB mic
+        try inputEngine.inputNode.auAudioUnit.setDeviceID(inputDevice.id)
 
-        // 3. Assign aggregate device to engine
-        try setEngineDevice(aggregateDeviceID)
+        // 3. Set output engine to write to BlackHole
+        try outputEngine.outputNode.auAudioUnit.setDeviceID(outputDevice.id)
 
-        // 4. Get the input format from the engine
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        print("Input format: \(inputFormat)")
+        // 4. Get the input format
+        let inputFormat = inputEngine.inputNode.outputFormat(forBus: 0)
+        let channels = Int(inputFormat.channelCount)
+        let sampleRate = inputFormat.sampleRate
+        print("Format: \(channels) ch, \(sampleRate) Hz")
 
-        guard inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 else {
+        guard sampleRate > 0 && channels > 0 else {
             throw AudioDaemonError.invalidFormat(description: "Input node has invalid format: \(inputFormat)")
         }
 
-        // 5. Build processing chain
-        var lastNode: AVAudioNode = inputNode
-        let lastFormat = inputFormat
+        // 5. Allocate ring buffer
+        ringBuffer = UnsafeMutablePointer<Float>.allocate(capacity: ringBufferFrames * channels)
+        ringBuffer?.initialize(repeating: 0, count: ringBufferFrames * channels)
+
+        // 6. Build processing chain on input engine
+        var lastNode: AVAudioNode = inputEngine.inputNode
+        let format = inputFormat
 
         // Noise Gate
         if config.noiseGate.enabled {
             print("Attaching noise gate...")
             if let gateNode = makeNoiseGateNode(
                 config: config.noiseGate,
-                sampleRate: Float(inputFormat.sampleRate)
+                sampleRate: Float(sampleRate)
             ) {
-                engine.attach(gateNode)
-                engine.connect(lastNode, to: gateNode, format: lastFormat)
+                inputEngine.attach(gateNode)
+                inputEngine.connect(lastNode, to: gateNode, format: format)
                 lastNode = gateNode
             } else {
                 print("  Warning: Failed to create noise gate node, skipping")
@@ -75,8 +82,8 @@ final class AudioDaemon {
                 band.bypass = false
             }
 
-            engine.attach(eq)
-            engine.connect(lastNode, to: eq, format: lastFormat)
+            inputEngine.attach(eq)
+            inputEngine.connect(lastNode, to: eq, format: format)
             lastNode = eq
         }
 
@@ -91,10 +98,9 @@ final class AudioDaemon {
                 componentFlagsMask: 0
             )
             let compressor = AVAudioUnitEffect(audioComponentDescription: compressorDesc)
-            engine.attach(compressor)
-            engine.connect(lastNode, to: compressor, format: lastFormat)
+            inputEngine.attach(compressor)
+            inputEngine.connect(lastNode, to: compressor, format: format)
 
-            // Set compressor parameters
             let au = compressor.audioUnit
             AudioUnitSetParameter(au, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, config.compressor.threshold, 0)
             AudioUnitSetParameter(au, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, config.compressor.headRoom, 0)
@@ -105,44 +111,84 @@ final class AudioDaemon {
             lastNode = compressor
         }
 
-        // Connect last processing node to output
-        engine.connect(lastNode, to: engine.mainMixerNode, format: lastFormat)
+        // Connect last processing node to mainMixerNode (required for engine to run)
+        inputEngine.connect(lastNode, to: inputEngine.mainMixerNode, format: format)
+        inputEngine.mainMixerNode.outputVolume = 0 // mute — we capture via tap instead
 
-        // 6. Start engine
-        print("Starting audio engine...")
-        try engine.start()
+        // 7. Install tap on the last processing node to capture processed audio
+        let ringBuf = self.ringBuffer!
+        let ringSize = self.ringBufferFrames
+        let lock = self.bufferLock
+        let numChannels = channels
+
+        // Capture writePos as a reference via the class
+        let daemon = self
+
+        lastNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            guard let channelData = buffer.floatChannelData else { return }
+            let frames = Int(buffer.frameLength)
+
+            lock.lock()
+            for i in 0..<frames {
+                for ch in 0..<numChannels {
+                    ringBuf[daemon.writePos * numChannels + ch] = channelData[ch][i]
+                }
+                daemon.writePos = (daemon.writePos + 1) % ringSize
+            }
+            lock.unlock()
+        }
+
+        // 8. Set up output engine with source node reading from ring buffer
+        let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
+
+        let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
+            let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            let frames = Int(frameCount)
+
+            lock.lock()
+            for buffer in ablPointer {
+                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                let bufChannels = Int(buffer.mNumberChannels)
+                for i in 0..<frames {
+                    for ch in 0..<bufChannels {
+                        if daemon.readPos != daemon.writePos {
+                            data[i * bufChannels + ch] = ringBuf[daemon.readPos * numChannels + min(ch, numChannels - 1)]
+                        } else {
+                            data[i * bufChannels + ch] = 0 // underrun — output silence
+                        }
+                    }
+                    if daemon.readPos != daemon.writePos {
+                        daemon.readPos = (daemon.readPos + 1) % ringSize
+                    }
+                }
+            }
+            lock.unlock()
+
+            return noErr
+        }
+
+        outputEngine.attach(sourceNode)
+        outputEngine.connect(sourceNode, to: outputEngine.mainMixerNode, format: outputFormat)
+
+        // 9. Start both engines
+        print("Starting audio engines...")
+        try inputEngine.start()
+        try outputEngine.start()
+
         print("VirtuMic is running. Audio chain: \(config.inputDevice) -> processing -> \(config.outputDevice)")
         print("Select '\(config.outputDevice)' as your microphone in meeting apps.")
     }
 
     func stop() {
         print("Stopping VirtuMic...")
-        engine.stop()
-        if aggregateDeviceID != 0 {
-            DeviceManager.destroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = 0
+        inputEngine.inputNode.removeTap(onBus: 0)
+        inputEngine.stop()
+        outputEngine.stop()
+        if let buf = ringBuffer {
+            buf.deallocate()
+            ringBuffer = nil
         }
         print("Stopped.")
-    }
-
-    private func setEngineDevice(_ deviceID: AudioDeviceID) throws {
-        var deviceID = deviceID
-        guard let outputUnit = engine.outputNode.audioUnit else {
-            throw AudioDaemonError.noAudioUnit
-        }
-
-        let status = AudioUnitSetProperty(
-            outputUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &deviceID,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-
-        guard status == noErr else {
-            throw AudioDaemonError.deviceAssignFailed(status: status)
-        }
     }
 }
 

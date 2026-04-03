@@ -1,5 +1,9 @@
 import Foundation
 
+// Ensure output is not buffered
+setbuf(stdout, nil)
+setbuf(stderr, nil)
+
 // MARK: - Parse arguments
 
 let configPath: String

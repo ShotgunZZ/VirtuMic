@@ -1,7 +1,7 @@
 {
-  "inputDevice": "USB Microphone",
+  "inputDevice": "fifine Microphone",
   "outputDevice": "BlackHole 2ch",
-  "sampleRate": 48000,
+  "sampleRate": 44100,
   "noiseGate": {
     "enabled": true,
     "thresholdDB": -40.0,
