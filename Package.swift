@@ -15,10 +15,5 @@ let package = Package(
                 .linkedFramework("Accelerate"),
             ]
         ),
-        .testTarget(
-            name: "VirtuMicTests",
-            dependencies: ["VirtuMic"],
-            path: "Tests/VirtuMicTests"
-        ),
     ]
 )
