@@ -1,0 +1,50 @@
+{
+  "inputDevice": "USB Microphone",
+  "outputDevice": "BlackHole 2ch",
+  "sampleRate": 48000,
+  "noiseGate": {
+    "enabled": true,
+    "thresholdDB": -40.0,
+    "attackTime": 0.002,
+    "releaseTime": 0.05,
+    "holdTime": 0.1
+  },
+  "eq": {
+    "enabled": true,
+    "globalGain": 0.0,
+    "bands": [
+      {
+        "filterType": "highPass",
+        "frequency": 80,
+        "gain": 0,
+        "bandwidth": 0.5
+      },
+      {
+        "filterType": "parametric",
+        "frequency": 200,
+        "gain": -3,
+        "bandwidth": 1.0
+      },
+      {
+        "filterType": "parametric",
+        "frequency": 3000,
+        "gain": 3,
+        "bandwidth": 1.5
+      },
+      {
+        "filterType": "highShelf",
+        "frequency": 10000,
+        "gain": -2,
+        "bandwidth": 0.5
+      }
+    ]
+  },
+  "compressor": {
+    "enabled": true,
+    "threshold": -20.0,
+    "headRoom": 5.0,
+    "attackTime": 0.01,
+    "releaseTime": 0.1,
+    "masterGain": 0.0
+  }
+}
