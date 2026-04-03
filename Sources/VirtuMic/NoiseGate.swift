@@ -4,19 +4,37 @@ import AudioToolbox
 // MARK: - DSP Logic (testable, no AU dependency)
 
 final class NoiseGateDSP {
-    private let thresholdLinear: Float
-    private let attackCoeff: Float
-    private let releaseCoeff: Float
-    private let holdSamples: Int
+    private var thresholdLinear: Float
+    private var attackCoeff: Float
+    private var releaseCoeff: Float
+    private var holdSamples: Int
+    private var sampleRate: Float
 
     private var envelope: Float = 0.0
     private var holdCounter: Int = 0
 
     init(thresholdDB: Float, attackTime: Float, releaseTime: Float, holdTime: Float, sampleRate: Float) {
+        self.sampleRate = sampleRate
         self.thresholdLinear = powf(10.0, thresholdDB / 20.0)
         self.attackCoeff = expf(-1.0 / (attackTime * sampleRate))
         self.releaseCoeff = expf(-1.0 / (releaseTime * sampleRate))
         self.holdSamples = Int(holdTime * sampleRate)
+    }
+
+    func setThreshold(dB: Float) {
+        thresholdLinear = powf(10.0, dB / 20.0)
+    }
+
+    func setAttack(time: Float) {
+        attackCoeff = expf(-1.0 / (time * sampleRate))
+    }
+
+    func setRelease(time: Float) {
+        releaseCoeff = expf(-1.0 / (time * sampleRate))
+    }
+
+    func setHold(time: Float) {
+        holdSamples = Int(time * sampleRate)
     }
 
     func process(_ samples: inout [Float], frameCount: Int) {
