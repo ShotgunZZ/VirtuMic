@@ -57,6 +57,13 @@ struct AudioConfig: Codable {
         let maxFreq = Float(sampleRate / 2.0)
 
         if eq.enabled {
+            guard !eq.bands.isEmpty else {
+                throw ConfigError.outOfRange(
+                    parameter: "eq.bands",
+                    value: 0,
+                    range: "at least 1 band required"
+                )
+            }
             for (i, band) in eq.bands.enumerated() {
                 guard Self.validFilterTypes.contains(band.filterType) else {
                     throw ConfigError.invalidFilterType(band: i, type: band.filterType)

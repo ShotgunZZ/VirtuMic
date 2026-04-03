@@ -115,23 +115,31 @@ final class NoiseGateAudioUnit: AUAudioUnit {
 
 // MARK: - AVAudioEngine node wrapper
 
-func makeNoiseGateNode(config: NoiseGateConfig, sampleRate: Float) -> AVAudioUnitEffect? {
-    let desc = AudioComponentDescription(
-        componentType: kAudioUnitType_Effect,
-        componentSubType: FourCharCode(truncating: "nGte"),
-        componentManufacturer: FourCharCode(truncating: "VrMc"),
-        componentFlags: 0,
-        componentFlagsMask: 0
-    )
+private let noiseGateComponentDescription = AudioComponentDescription(
+    componentType: kAudioUnitType_Effect,
+    componentSubType: FourCharCode(truncating: "nGte"),
+    componentManufacturer: FourCharCode(truncating: "VrMc"),
+    componentFlags: 0,
+    componentFlagsMask: 0
+)
 
+private var noiseGateRegistered = false
+
+func registerNoiseGate() {
+    guard !noiseGateRegistered else { return }
     AUAudioUnit.registerSubclass(
         NoiseGateAudioUnit.self,
-        as: desc,
+        as: noiseGateComponentDescription,
         name: "VirtuMic Noise Gate",
         version: 1
     )
+    noiseGateRegistered = true
+}
 
-    let node = AVAudioUnitEffect(audioComponentDescription: desc)
+func makeNoiseGateNode(config: NoiseGateConfig, sampleRate: Float) -> AVAudioUnitEffect? {
+    registerNoiseGate()
+
+    let node = AVAudioUnitEffect(audioComponentDescription: noiseGateComponentDescription)
 
     if let au = node.auAudioUnit as? NoiseGateAudioUnit {
         au.dsp = NoiseGateDSP(

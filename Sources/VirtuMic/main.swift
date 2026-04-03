@@ -30,12 +30,15 @@ let daemon = AudioDaemon(config: config)
 
 // MARK: - Signal handling for clean shutdown
 
-let signalCallback: sig_t = { _ in
-    daemon.stop()
-    exit(0)
-}
-signal(SIGINT, signalCallback)
-signal(SIGTERM, signalCallback)
+signal(SIGINT, SIG_IGN)
+signal(SIGTERM, SIG_IGN)
+
+let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+sigintSource.setEventHandler { daemon.stop(); exit(0) }
+sigtermSource.setEventHandler { daemon.stop(); exit(0) }
+sigintSource.resume()
+sigtermSource.resume()
 
 do {
     try daemon.start()

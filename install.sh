@@ -85,7 +85,7 @@ PLIST
 
 # Load LaunchAgent
 echo "Loading LaunchAgent..."
-launchctl bootout "gui/$(id -u)/$PLIST_NAME" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/com.virtumic.daemon" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_DIR/$PLIST_NAME"
 
 echo ""
