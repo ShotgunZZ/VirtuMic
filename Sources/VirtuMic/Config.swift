@@ -204,10 +204,12 @@ struct AudioConfig: Codable {
     }
 
     func save(to path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(self)
-        try data.write(to: URL(fileURLWithPath: path))
+        try data.write(to: url)
     }
 
     static var defaultConfig: AudioConfig {

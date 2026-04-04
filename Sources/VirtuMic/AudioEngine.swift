@@ -2,11 +2,15 @@ import AVFoundation
 import CoreAudio
 import AudioToolbox
 import Combine
+import os
+
+private let log = Logger(subsystem: "com.virtumic.app2", category: "engine")
 
 // MARK: - AudioEngine
 
 final class AudioEngine: ObservableObject {
     @Published var isRunning = false
+    @Published var isMonitoring = false
     @Published var inputLevel: Float = -60.0
     @Published var errorMessage: String?
     @Published var config: AudioConfig
@@ -24,6 +28,8 @@ final class AudioEngine: ObservableObject {
     private var eqNode: AVAudioUnitEQ?
     private var compressorNode: AVAudioUnitEffect?
     private var lastProcessingNode: AVAudioNode?
+    private var engineSampleRate: Double = 48000
+    private var engineChannels: Int = 2
 
     private let configPath: String
     private var saveWorkItem: DispatchWorkItem?
@@ -63,7 +69,16 @@ final class AudioEngine: ObservableObject {
         if isRunning { stop() } else { start() }
     }
 
+    func toggleMonitoring() {
+        if isMonitoring {
+            stopMonitor()
+        } else {
+            startMonitor()
+        }
+    }
+
     private func startEngines() throws {
+        setbuf(stdout, nil)
         inputEngine = AVAudioEngine()
         outputEngine = AVAudioEngine()
         writePos = 0
@@ -71,17 +86,28 @@ final class AudioEngine: ObservableObject {
 
         let inputDevice = try DeviceManager.findDevice(matching: config.inputDevice, needsInput: true, needsOutput: false)
         let outputDevice = try DeviceManager.findDevice(matching: config.outputDevice, needsInput: false, needsOutput: true)
+        log.info("[VirtuMic] Input: \(inputDevice.name) (ID: \(inputDevice.id))")
+        log.info("[VirtuMic] Output: \(outputDevice.name) (ID: \(outputDevice.id))")
 
-        try setEngineInputDevice(inputEngine, deviceID: inputDevice.id)
-        try setEngineOutputDevice(outputEngine, deviceID: outputDevice.id)
+        // Use system default input device (user should set fifine in System Settings)
+        // AVAudioEngine's inputNode automatically uses the system default
+        log.info("[VirtuMic] Using system default input device (no override)")
 
+        // Set output device to BlackHole (must use auAudioUnit — audioUnit is nil on fresh engine)
+        try outputEngine.outputNode.auAudioUnit.setDeviceID(outputDevice.id)
+        log.info("[VirtuMic] Set output device to BlackHole")
+
+        // Use inputNode's reported format (engine handles resampling internally)
         let inputFormat = inputEngine.inputNode.outputFormat(forBus: 0)
         let channels = Int(inputFormat.channelCount)
         let sampleRate = inputFormat.sampleRate
+        log.info("[VirtuMic] Using engine format: \(channels) ch, \(sampleRate) Hz")
 
         guard sampleRate > 0 && channels > 0 else {
             throw AudioEngineError.invalidFormat
         }
+        engineSampleRate = sampleRate
+        engineChannels = channels
 
         ringBuffer = UnsafeMutablePointer<Float>.allocate(capacity: ringBufferFrames * channels)
         ringBuffer?.initialize(repeating: 0, count: ringBufferFrames * channels)
@@ -136,19 +162,29 @@ final class AudioEngine: ObservableObject {
         lastNode = compressor
 
         inputEngine.connect(lastNode, to: inputEngine.mainMixerNode, format: format)
-        inputEngine.mainMixerNode.outputVolume = 0
+        inputEngine.mainMixerNode.outputVolume = 0.001  // near-silent playback through speakers
         lastProcessingNode = lastNode
 
-        // Tap for ring buffer + level metering
+        // Install tap on last processing node (BEFORE volume reduction)
+        // This gives full-volume processed audio for the ring buffer and level meter
         let ringBuf = ringBuffer!
         let ringSize = ringBufferFrames
         let lock = bufferLock
         let numChannels = channels
         let engine = self
 
-        lastNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        var tapCount = 0
+        lastNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
             guard let channelData = buffer.floatChannelData else { return }
             let frames = Int(buffer.frameLength)
+
+            tapCount += 1
+            if tapCount <= 5 || tapCount % 100 == 0 {
+                // Check if audio data is non-zero
+                var maxSample: Float = 0
+                for i in 0..<frames { maxSample = max(maxSample, fabsf(channelData[0][i])) }
+                log.info("[VirtuMic] Tap #\(tapCount): frames=\(frames), maxSample=\(maxSample), writePos=\(engine.writePos)")
+            }
 
             var maxLevel: Float = 0
             for i in 0..<frames {
@@ -160,10 +196,11 @@ final class AudioEngine: ObservableObject {
                 engine.inputLevel = db
             }
 
+            let tapChannels = min(Int(buffer.format.channelCount), numChannels)
             lock.lock()
             for i in 0..<frames {
                 for ch in 0..<numChannels {
-                    ringBuf[engine.writePos * numChannels + ch] = channelData[ch][i]
+                    ringBuf[engine.writePos * numChannels + ch] = channelData[min(ch, tapChannels - 1)][i]
                 }
                 engine.writePos = (engine.writePos + 1) % ringSize
             }
@@ -173,11 +210,14 @@ final class AudioEngine: ObservableObject {
         // Output engine
         let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
 
+        var srcCount = 0
         let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let frames = Int(frameCount)
 
             lock.lock()
+            let preReadPos = engine.readPos
+            let preWritePos = engine.writePos
             for buffer in ablPointer {
                 guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                 let bufChannels = Int(buffer.mNumberChannels)
@@ -196,6 +236,16 @@ final class AudioEngine: ObservableObject {
             }
             lock.unlock()
 
+            srcCount += 1
+            if srcCount <= 5 || srcCount % 100 == 0 {
+                // Check first sample of output
+                var outMax: Float = 0
+                if let firstBuf = ablPointer.first, let d = firstBuf.mData?.assumingMemoryBound(to: Float.self) {
+                    for i in 0..<frames { outMax = max(outMax, fabsf(d[i])) }
+                }
+                log.info("[VirtuMic] Src #\(srcCount): frames=\(frames), readPos=\(preReadPos)→\(engine.readPos), writePos=\(preWritePos), outMax=\(outMax)")
+            }
+
             return noErr
         }
 
@@ -204,45 +254,23 @@ final class AudioEngine: ObservableObject {
 
         try inputEngine.start()
         try outputEngine.start()
+        log.info("[VirtuMic] Both engines started successfully!")
     }
 
-    private func setEngineInputDevice(_ engine: AVAudioEngine, deviceID: AudioDeviceID) throws {
-        var devID = deviceID
-        guard let audioUnit = engine.inputNode.audioUnit else {
-            throw AudioEngineError.noAudioUnit
-        }
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &devID,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-        guard status == noErr else {
-            throw AudioEngineError.deviceAssignFailed(status: status)
-        }
+
+    private func startMonitor() {
+        guard isRunning else { return }
+        inputEngine.mainMixerNode.outputVolume = 1.0
+        isMonitoring = true
     }
 
-    private func setEngineOutputDevice(_ engine: AVAudioEngine, deviceID: AudioDeviceID) throws {
-        var devID = deviceID
-        guard let audioUnit = engine.outputNode.audioUnit else {
-            throw AudioEngineError.noAudioUnit
-        }
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &devID,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-        guard status == noErr else {
-            throw AudioEngineError.deviceAssignFailed(status: status)
-        }
+    private func stopMonitor() {
+        inputEngine.mainMixerNode.outputVolume = 0.001
+        isMonitoring = false
     }
 
     private func stopEngines() {
+        isMonitoring = false
         lastProcessingNode?.removeTap(onBus: 0)
         inputEngine.stop()
         outputEngine.stop()
