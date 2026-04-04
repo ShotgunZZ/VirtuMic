@@ -3,6 +3,7 @@ import CoreAudio
 import AudioToolbox
 import Combine
 import os
+import Atomics
 
 private let log = Logger(subsystem: "com.virtumic.app2", category: "engine")
 
@@ -20,9 +21,10 @@ final class AudioEngine: ObservableObject {
 
     private var ringBuffer: UnsafeMutablePointer<Float>?
     private let ringBufferFrames = 88200
-    private var writePos = 0
-    private var readPos = 0
-    private let bufferLock = NSLock()
+    private let writePos = ManagedAtomic<Int>(0)
+    private let readPos = ManagedAtomic<Int>(0)
+    private let atomicPeakLevel = ManagedAtomic<UInt32>(0)
+    private var levelTimer: Timer?
 
     private var noiseGateAU: NoiseGateAudioUnit?
     private var eqNode: AVAudioUnitEQ?
@@ -81,8 +83,9 @@ final class AudioEngine: ObservableObject {
         setbuf(stdout, nil)
         inputEngine = AVAudioEngine()
         outputEngine = AVAudioEngine()
-        writePos = 0
-        readPos = 0
+        writePos.store(0, ordering: .relaxed)
+        readPos.store(0, ordering: .relaxed)
+        atomicPeakLevel.store(Float(-60).bitPattern, ordering: .relaxed)
 
         let inputDevice = try DeviceManager.findDevice(matching: config.inputDevice, needsInput: true, needsOutput: false)
         let outputDevice = try DeviceManager.findDevice(matching: config.outputDevice, needsInput: false, needsOutput: true)
@@ -278,6 +281,8 @@ final class AudioEngine: ObservableObject {
         eqNode = nil
         compressorNode = nil
         lastProcessingNode = nil
+        levelTimer?.invalidate()
+        levelTimer = nil
         if let buf = ringBuffer {
             buf.deallocate()
             ringBuffer = nil
