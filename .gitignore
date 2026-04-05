@@ -4,3 +4,5 @@
 *.swp
 DerivedData/
 .worktrees/
+.superpowers/
+docs/superpowers/
