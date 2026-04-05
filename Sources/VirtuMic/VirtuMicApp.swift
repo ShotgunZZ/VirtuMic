@@ -72,7 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func makeMenuBarIcon(running: Bool) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        let size = NSSize(width: 14, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             let cyan = NSColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 1.0)
             let dim = NSColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.35)
@@ -81,30 +81,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             color.setStroke()
 
             let lw: CGFloat = 1.5
+            let cx: CGFloat = 7  // center x
 
             // Mic capsule (hollow rounded rect)
-            let capsule = NSBezierPath(roundedRect: NSRect(x: 5.5, y: 7, width: 7, height: 10), xRadius: 3.5, yRadius: 3.5)
+            let capsule = NSBezierPath(roundedRect: NSRect(x: cx - 3.5, y: 7, width: 7, height: 10), xRadius: 3.5, yRadius: 3.5)
             capsule.lineWidth = lw
             capsule.stroke()
 
             // Cradle arc
             let arc = NSBezierPath()
-            arc.appendArc(withCenter: NSPoint(x: 9, y: 7), radius: 6.5, startAngle: 180, endAngle: 0, clockwise: true)
+            arc.appendArc(withCenter: NSPoint(x: cx, y: 7), radius: 6, startAngle: 180, endAngle: 0, clockwise: true)
             arc.lineWidth = lw
             arc.stroke()
 
             // Stand
             let stand = NSBezierPath()
-            stand.move(to: NSPoint(x: 9, y: 0.5))
-            stand.line(to: NSPoint(x: 9, y: 3))
+            stand.move(to: NSPoint(x: cx, y: 0.5))
+            stand.line(to: NSPoint(x: cx, y: 3))
             stand.lineWidth = lw
             stand.lineCapStyle = .round
             stand.stroke()
 
             // Base
             let base = NSBezierPath()
-            base.move(to: NSPoint(x: 5.5, y: 0.5))
-            base.line(to: NSPoint(x: 12.5, y: 0.5))
+            base.move(to: NSPoint(x: cx - 3.5, y: 0.5))
+            base.line(to: NSPoint(x: cx + 3.5, y: 0.5))
             base.lineWidth = lw
             base.lineCapStyle = .round
             base.stroke()
@@ -216,10 +217,9 @@ struct VirtuMicApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            EmptyView()
-        } label: {
+        Settings {
             EmptyView()
         }
+        .defaultSize(width: 0, height: 0)
     }
 }
