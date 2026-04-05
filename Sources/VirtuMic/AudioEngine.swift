@@ -96,6 +96,11 @@ final class AudioEngine: ObservableObject {
         // AVAudioEngine's inputNode automatically uses the system default
         log.info("[VirtuMic] Using system default input device (no override)")
 
+        // Reduce I/O buffer size for lower latency
+        let desiredBufferSize: UInt32 = 512
+        setDeviceBufferSize(deviceID: inputDevice.id, size: desiredBufferSize)
+        setDeviceBufferSize(deviceID: outputDevice.id, size: desiredBufferSize)
+
         // Set output device to BlackHole (must use auAudioUnit — audioUnit is nil on fresh engine)
         try outputEngine.outputNode.auAudioUnit.setDeviceID(outputDevice.id)
         log.info("[VirtuMic] Set output device to BlackHole")
@@ -217,7 +222,7 @@ final class AudioEngine: ObservableObject {
         var lastSamples = [Float](repeating: 0, count: numChannels)
         var fadeGain: Float = 0
         var preFilled = false
-        let preFillThreshold = 4410  // ~92ms at 48kHz — 1 tap buffer worth of headroom
+        let preFillThreshold = 2048  // ~43ms at 48kHz — reduced for low-latency I/O buffer
 
         let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
@@ -451,6 +456,26 @@ final class AudioEngine: ObservableObject {
     private func applyCompressorParam(_ param: AudioUnitParameterID, _ value: Float) {
         guard let au = compressorNode?.audioUnit else { return }
         AudioUnitSetParameter(au, param, kAudioUnitScope_Global, 0, value, 0)
+    }
+
+    // MARK: - Device Helpers
+
+    private func setDeviceBufferSize(deviceID: AudioDeviceID, size: UInt32) {
+        var bufferSize = size
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectSetPropertyData(
+            deviceID, &address, 0, nil,
+            UInt32(MemoryLayout<UInt32>.size), &bufferSize
+        )
+        if status == noErr {
+            log.info("[VirtuMic] Set buffer size to \(bufferSize) for device \(deviceID)")
+        } else {
+            log.warning("[VirtuMic] Failed to set buffer size for device \(deviceID): \(status)")
+        }
     }
 
     // MARK: - Config Persistence
