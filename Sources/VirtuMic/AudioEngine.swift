@@ -58,6 +58,7 @@ final class AudioEngine: ObservableObject {
             isRunning = true
             errorMessage = nil
         } catch {
+            log.error("[VirtuMic] Engine start failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             isRunning = false
         }
