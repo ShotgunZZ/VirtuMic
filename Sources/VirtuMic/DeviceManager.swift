@@ -97,6 +97,21 @@ enum DeviceManager {
         AudioHardwareDestroyAggregateDevice(deviceID)
     }
 
+    static func setSystemDefaultInput(_ deviceID: AudioDeviceID) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var id = deviceID
+        AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size),
+            &id
+        )
+    }
+
     // MARK: - Private helpers
 
     private static func getDeviceIDs() -> [AudioDeviceID] {

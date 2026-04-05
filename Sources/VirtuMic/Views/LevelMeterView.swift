@@ -4,17 +4,23 @@ struct LevelMeterView: View {
     let level: Float
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.black.opacity(0.3))
+        VStack(spacing: 2) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.black.opacity(0.3))
 
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(levelGradient)
-                    .frame(width: barWidth(in: geometry.size.width))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(levelGradient)
+                        .frame(width: barWidth(in: geometry.size.width))
+                }
             }
+            .frame(height: 8)
+
+            Text(String(format: "%.1f dB", level))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.secondary)
         }
-        .frame(height: 8)
     }
 
     private func barWidth(in totalWidth: CGFloat) -> CGFloat {

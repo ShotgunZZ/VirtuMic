@@ -88,6 +88,10 @@ final class AudioEngine: ObservableObject {
     func setInputDevice(_ name: String) {
         config.inputDevice = name
         scheduleSave()
+        // Change the system default input device so AVAudioEngine picks it up
+        if let device = try? DeviceManager.findDevice(matching: name, needsInput: true, needsOutput: false) {
+            DeviceManager.setSystemDefaultInput(device.id)
+        }
         if isRunning {
             stop()
             start()
@@ -116,9 +120,9 @@ final class AudioEngine: ObservableObject {
         log.info("[VirtuMic] Input: \(inputDevice.name) (ID: \(inputDevice.id))")
         log.info("[VirtuMic] Output: \(outputDevice.name) (ID: \(outputDevice.id))")
 
-        // Use system default input device (user should set fifine in System Settings)
-        // AVAudioEngine's inputNode automatically uses the system default
-        log.info("[VirtuMic] Using system default input device (no override)")
+        // Set system default input to the configured device
+        DeviceManager.setSystemDefaultInput(inputDevice.id)
+        log.info("[VirtuMic] Set system default input to \(inputDevice.name)")
 
         // Reduce I/O buffer size for lower latency
         let desiredBufferSize: UInt32 = 512

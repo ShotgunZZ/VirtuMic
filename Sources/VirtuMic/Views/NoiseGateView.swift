@@ -14,18 +14,18 @@ struct NoiseGateView: View {
         }) {
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
-                    ParameterSlider(label: "Threshold", value: $threshold, range: -96...0, unit: "dB", format: "%.0f") {
+                    ParameterSlider(label: "Threshold", value: $threshold, range: -96...0, unit: "dB", format: "%.1f") {
                         engine.setNoiseGateThreshold($0)
                     }
-                    ParameterSlider(label: "Attack", value: $attack, range: 0.0001...0.1, unit: "ms", format: "%.1f", logarithmic: true) {
+                    ParameterSlider(label: "Attack", value: $attack, range: 0.0001...0.1, unit: "s", format: "%.4f", logarithmic: true) {
                         engine.setNoiseGateAttack($0)
                     }
                 }
                 HStack(spacing: 12) {
-                    ParameterSlider(label: "Release", value: $release, range: 0.01...1.0, unit: "ms", format: "%.0f", logarithmic: true) {
+                    ParameterSlider(label: "Release", value: $release, range: 0.01...1.0, unit: "s", format: "%.2f", logarithmic: true) {
                         engine.setNoiseGateRelease($0)
                     }
-                    ParameterSlider(label: "Hold", value: $hold, range: 0...2.0, unit: "ms", format: "%.0f") {
+                    ParameterSlider(label: "Hold", value: $hold, range: 0...2.0, unit: "s", format: "%.2f") {
                         engine.setNoiseGateHold($0)
                     }
                 }

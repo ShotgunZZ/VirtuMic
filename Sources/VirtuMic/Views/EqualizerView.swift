@@ -76,7 +76,7 @@ struct EqualizerView: View {
                 Text(formatFreq(band.frequency))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white)
-                Text(String(format: "%.0f dB", band.gain))
+                Text(String(format: "%.1f dB", band.gain))
                     .font(.system(size: 8))
                     .foregroundColor(.secondary)
             }

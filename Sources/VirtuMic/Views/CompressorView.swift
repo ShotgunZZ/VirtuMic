@@ -15,7 +15,7 @@ struct CompressorView: View {
         }) {
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
-                    ParameterSlider(label: "Threshold", value: $threshold, range: -40...20, unit: "dB", format: "%.0f") {
+                    ParameterSlider(label: "Threshold", value: $threshold, range: -40...20, unit: "dB", format: "%.1f") {
                         engine.setCompressorThreshold($0)
                     }
                     ParameterSlider(label: "Headroom", value: $headRoom, range: 0.1...40, unit: "dB", format: "%.1f") {
@@ -23,10 +23,10 @@ struct CompressorView: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    ParameterSlider(label: "Attack", value: $attack, range: 0.0001...0.2, unit: "ms", format: "%.1f", logarithmic: true) {
+                    ParameterSlider(label: "Attack", value: $attack, range: 0.0001...0.2, unit: "s", format: "%.4f", logarithmic: true) {
                         engine.setCompressorAttack($0)
                     }
-                    ParameterSlider(label: "Release", value: $release, range: 0.01...3.0, unit: "ms", format: "%.0f", logarithmic: true) {
+                    ParameterSlider(label: "Release", value: $release, range: 0.01...3.0, unit: "s", format: "%.2f", logarithmic: true) {
                         engine.setCompressorRelease($0)
                     }
                 }
