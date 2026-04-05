@@ -1,3 +1,3 @@
 #!/bin/bash
-cd "/Users/shaunz/Documents/Projects/Virtual Mic"
+cd "$(dirname "$0")"
 swift run VirtuMic
