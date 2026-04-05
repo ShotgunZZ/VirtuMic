@@ -54,8 +54,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         logger.info("Status bar item created, auto-starting in 1s")
 
-        // Auto-start after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Auto-start after a brief delay (2s gives audio devices time to initialize)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.requestMicAndStart()
         }
     }

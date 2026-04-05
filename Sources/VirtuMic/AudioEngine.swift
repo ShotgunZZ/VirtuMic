@@ -208,7 +208,7 @@ final class AudioEngine: ObservableObject {
 
         // Install tap on last processing node (BEFORE volume reduction)
         // This gives full-volume processed audio for the ring buffer and level meter
-        let ringBuf = ringBuffer!
+        guard let ringBuf = ringBuffer else { throw AudioEngineError.invalidFormat }
         let ringSize = ringBufferFrames
         let numChannels = channels
         let atomicWP = writePos
@@ -249,7 +249,9 @@ final class AudioEngine: ObservableObject {
         }
 
         // Output engine — lock-free reader with underrun smoothing
-        let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
+        guard let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels)) else {
+            throw AudioEngineError.invalidFormat
+        }
 
         var srcCount = 0
         var lastSamples = [Float](repeating: 0, count: numChannels)
