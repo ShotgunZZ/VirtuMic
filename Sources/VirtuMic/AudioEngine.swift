@@ -116,7 +116,6 @@ final class AudioEngine: ObservableObject {
     }
 
     private func startEngines() throws {
-        setbuf(stdout, nil)
         inputEngine = AVAudioEngine()
         outputEngine = AVAudioEngine()
         writePos.store(0, ordering: .relaxed)
@@ -218,17 +217,9 @@ final class AudioEngine: ObservableObject {
         let atomicRP = readPos
         let atomicPeak = atomicPeakLevel
 
-        var tapCount = 0
         lastNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
             guard let channelData = buffer.floatChannelData else { return }
             let frames = Int(buffer.frameLength)
-
-            tapCount += 1
-            if tapCount <= 5 || tapCount % 100 == 0 {
-                var maxSample: Float = 0
-                for i in 0..<frames { maxSample = max(maxSample, fabsf(channelData[0][i])) }
-                log.info("[VirtuMic] Tap #\(tapCount): frames=\(frames), maxSample=\(maxSample), writePos=\(atomicWP.load(ordering: .relaxed))")
-            }
 
             // Level metering — atomic store, zero allocations
             var maxLevel: Float = 0
@@ -256,11 +247,10 @@ final class AudioEngine: ObservableObject {
             throw AudioEngineError.invalidFormat
         }
 
-        var srcCount = 0
         var lastSamples = [Float](repeating: 0, count: numChannels)
         var fadeGain: Float = 0
         var preFilled = false
-        let preFillThreshold = 2048  // ~43ms at 48kHz — reduced for low-latency I/O buffer
+        let preFillThreshold = 1024  // ~21ms at 48kHz
 
         let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
@@ -268,7 +258,6 @@ final class AudioEngine: ObservableObject {
 
             let wp = atomicWP.load(ordering: .acquiring)
             var rp = atomicRP.load(ordering: .relaxed)
-            let preReadPos = rp
 
             // Wait for ring buffer to pre-fill before reading
             if !preFilled {
@@ -316,15 +305,6 @@ final class AudioEngine: ObservableObject {
 
             atomicRP.store(rp, ordering: .releasing)
 
-            srcCount += 1
-            if srcCount <= 5 || srcCount % 100 == 0 {
-                var outMax: Float = 0
-                if let firstBuf = ablPointer.first, let d = firstBuf.mData?.assumingMemoryBound(to: Float.self) {
-                    for i in 0..<frames { outMax = max(outMax, fabsf(d[i])) }
-                }
-                log.info("[VirtuMic] Src #\(srcCount): frames=\(frames), readPos=\(preReadPos)→\(rp), writePos=\(wp), outMax=\(outMax)")
-            }
-
             return noErr
         }
 
@@ -336,7 +316,7 @@ final class AudioEngine: ObservableObject {
         log.info("[VirtuMic] Both engines started successfully!")
 
         // Poll atomic peak level from main thread (no allocation on audio thread)
-        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let bits = self.atomicPeakLevel.load(ordering: .relaxed)
             self.inputLevel = Float(bitPattern: bits)

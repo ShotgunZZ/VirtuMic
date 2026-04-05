@@ -216,7 +216,7 @@ struct AudioConfig: Codable {
         AudioConfig(
             inputDevice: "",
             outputDevice: "BlackHole 2ch",
-            sampleRate: 44100,
+            sampleRate: 48000,
             noiseGate: NoiseGateConfig(enabled: true, thresholdDB: -40, attackTime: 0.002, releaseTime: 0.05, holdTime: 0.1),
             eq: EQConfig(enabled: true, globalGain: 0, bands: [
                 EQBandConfig(filterType: "highPass", frequency: 80, gain: 0, bandwidth: 0.5),

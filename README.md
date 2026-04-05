@@ -1,12 +1,25 @@
 # VirtuMic
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-black.svg)](https://github.com/ShotgunZZ/VirtuMic)
+[![Swift](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org)
+
 Open-source virtual microphone for macOS with built-in noise gate, EQ, and compressor.
 
 VirtuMic routes audio from any input device through a real-time processing chain — noise gate, 5-band parametric EQ, and compressor — then outputs to a virtual audio device ([BlackHole](https://existential.audio/blackhole/)). Any app (Zoom, Discord, OBS, etc.) can use BlackHole as its microphone input to get your processed audio.
 
+## How It Works
+
+```
+Microphone → Noise Gate → EQ → Compressor → BlackHole → Zoom/Discord/OBS
+```
+
+VirtuMic runs two audio engines connected by a lock-free ring buffer. The input engine captures and processes your mic audio in real time. The output engine writes the processed audio to BlackHole, which appears as a virtual microphone to other apps.
+
 ## Requirements
 
 - macOS 13 (Ventura) or later
+- Apple Silicon or Intel Mac
 - [BlackHole 2ch](https://existential.audio/blackhole/) virtual audio driver
 
 ## Install
@@ -20,7 +33,7 @@ BlackHole 2ch will be installed automatically if not already present.
 
 ## Usage
 
-1. **Launch VirtuMic** — it appears as a microphone icon in your menu bar
+1. **Launch VirtuMic** — it appears as a cyan microphone icon in your menu bar
 2. **Click the icon** → **Show Mixer** to open the audio controls
 3. **Select your input device** (microphone, headset, etc.) from the dropdown
 4. **Adjust processing** — tune the noise gate, EQ bands, and compressor to taste
@@ -38,13 +51,37 @@ Click **Monitor (Speakers)** in the menu bar to hear your processed audio throug
 - **5-Band Parametric EQ** — shape your tone with low shelf, 3 parametric bands, and high shelf
 - **Compressor** — even out volume levels (threshold, headroom, attack, release, gain)
 - **Real-time level meter** — see your input level at a glance
-- **Low latency** — lock-free ring buffer with 512-frame I/O buffers (~10ms)
+- **Low latency** — lock-free ring buffer with 512-frame I/O buffers
 - **Persistent config** — settings saved automatically to `~/.config/virtual-mic/config.json`
+
+## Configuration
+
+Settings are stored at `~/.config/virtual-mic/config.json` and saved automatically when you adjust controls. The config persists across app updates and reinstalls.
 
 ## Known Limitations
 
 - **Bluetooth input devices** (AirPods, etc.) may not work reliably due to Bluetooth audio profile switching
-- **Unsigned app** — macOS Gatekeeper will warn on first launch. Right-click the app → Open to bypass this once
+- **ARM only** — Homebrew releases are built for Apple Silicon. Intel users can build from source.
+
+## Troubleshooting
+
+**"VirtuMic is damaged and can't be opened"**
+The app is unsigned. Run: `xattr -cr /Applications/VirtuMic.app`
+
+**No menu bar icon appears**
+Try quitting and relaunching. If it persists, reset Launch Services:
+```bash
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u /Applications/VirtuMic.app
+```
+
+**Microphone permission denied**
+Go to System Settings → Privacy & Security → Microphone and enable VirtuMic.
+
+**No audio output**
+Make sure the app you're using (Zoom, Discord, etc.) has its input set to "BlackHole 2ch", not your physical microphone.
+
+**Audio dropouts or glitches**
+Close other audio-intensive apps. If using a USB microphone, try a different USB port.
 
 ## Building from Source
 
