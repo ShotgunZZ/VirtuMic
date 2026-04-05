@@ -2,7 +2,7 @@ import SwiftUI
 import AVFoundation
 import os
 
-private let logger = Logger(subsystem: "com.virtumic.app2", category: "app")
+private let logger = Logger(subsystem: "com.shotgunzz.virtumic", category: "app")
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!

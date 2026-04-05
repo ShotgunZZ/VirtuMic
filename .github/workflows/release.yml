@@ -32,7 +32,7 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>VirtuMic</string>
             <key>CFBundleIdentifier</key>
-            <string>com.virtumic.app</string>
+            <string>com.shotgunzz.virtumic</string>
             <key>CFBundleName</key>
             <string>VirtuMic</string>
             <key>CFBundleDisplayName</key>

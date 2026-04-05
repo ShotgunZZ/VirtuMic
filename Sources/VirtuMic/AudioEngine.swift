@@ -5,7 +5,7 @@ import Combine
 import os
 import Atomics
 
-private let log = Logger(subsystem: "com.virtumic.app2", category: "engine")
+private let log = Logger(subsystem: "com.shotgunzz.virtumic", category: "engine")
 
 // MARK: - AudioEngine
 
