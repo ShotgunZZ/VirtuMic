@@ -35,6 +35,7 @@ final class AudioEngine: ObservableObject {
 
     private let configPath: String
     private var saveWorkItem: DispatchWorkItem?
+    private var restartWorkItem: DispatchWorkItem?
     private var outputDeviceListener: AudioObjectPropertyListenerBlock?
 
     init() {
@@ -104,12 +105,18 @@ final class AudioEngine: ObservableObject {
 
     private func restartEngine() {
         guard isRunning else { return }
-        let wasMonitoring = isMonitoring
-        stop()
-        start()
-        if wasMonitoring {
-            startMonitor()
+        restartWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            let wasMonitoring = self.isMonitoring
+            self.stop()
+            self.start()
+            if wasMonitoring {
+                self.startMonitor()
+            }
         }
+        restartWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
     }
 
     private func startEngines() throws {
