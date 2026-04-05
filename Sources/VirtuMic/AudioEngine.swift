@@ -104,12 +104,11 @@ final class AudioEngine: ObservableObject {
     }
 
     private func restartEngine() {
-        guard isRunning else { return }
         restartWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             let wasMonitoring = self.isMonitoring
-            self.stop()
+            if self.isRunning { self.stop() }
             self.start()
             if wasMonitoring {
                 self.startMonitor()
