@@ -35,6 +35,7 @@ final class AudioEngine: ObservableObject {
 
     private let configPath: String
     private var saveWorkItem: DispatchWorkItem?
+    private var outputDeviceListener: AudioObjectPropertyListenerBlock?
 
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -92,18 +93,22 @@ final class AudioEngine: ObservableObject {
         if let device = try? DeviceManager.findDevice(matching: name, needsInput: true, needsOutput: false) {
             DeviceManager.setSystemDefaultInput(device.id)
         }
-        if isRunning {
-            stop()
-            start()
-        }
+        restartEngine()
     }
 
     func setOutputDevice(_ name: String) {
         config.outputDevice = name
         scheduleSave()
-        if isRunning {
-            stop()
-            start()
+        restartEngine()
+    }
+
+    private func restartEngine() {
+        guard isRunning else { return }
+        let wasMonitoring = isMonitoring
+        stop()
+        start()
+        if wasMonitoring {
+            startMonitor()
         }
     }
 
@@ -331,6 +336,13 @@ final class AudioEngine: ObservableObject {
             let bits = self.atomicPeakLevel.load(ordering: .relaxed)
             self.inputLevel = Float(bitPattern: bits)
         }
+
+        // Watch for system output device changes — restart engine to pick up new device
+        outputDeviceListener = DeviceManager.watchDefaultOutputDevice { [weak self] in
+            guard let self = self, self.isRunning else { return }
+            log.info("[VirtuMic] System output device changed, restarting engine")
+            self.restartEngine()
+        }
     }
 
 
@@ -347,6 +359,10 @@ final class AudioEngine: ObservableObject {
 
     private func stopEngines() {
         isMonitoring = false
+        if let listener = outputDeviceListener {
+            DeviceManager.stopWatchingDefaultOutputDevice(listener)
+            outputDeviceListener = nil
+        }
         lastProcessingNode?.removeTap(onBus: 0)
         inputEngine.stop()
         outputEngine.stop()

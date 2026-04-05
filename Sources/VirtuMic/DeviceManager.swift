@@ -112,6 +112,38 @@ enum DeviceManager {
         )
     }
 
+    static func watchDefaultOutputDevice(onChange: @escaping () -> Void) -> AudioObjectPropertyListenerBlock {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let block: AudioObjectPropertyListenerBlock = { _, _ in
+            DispatchQueue.main.async { onChange() }
+        }
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            nil,
+            block
+        )
+        return block
+    }
+
+    static func stopWatchingDefaultOutputDevice(_ block: @escaping AudioObjectPropertyListenerBlock) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            nil,
+            block
+        )
+    }
+
     // MARK: - Private helpers
 
     private static func getDeviceIDs() -> [AudioDeviceID] {
