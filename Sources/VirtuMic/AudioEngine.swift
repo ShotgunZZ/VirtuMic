@@ -90,10 +90,6 @@ final class AudioEngine: ObservableObject {
     func setInputDevice(_ name: String) {
         config.inputDevice = name
         scheduleSave()
-        // Change the system default input device so AVAudioEngine picks it up
-        if let device = try? DeviceManager.findDevice(matching: name, needsInput: true, needsOutput: false) {
-            DeviceManager.setSystemDefaultInput(device.id)
-        }
         restartEngine()
     }
 
