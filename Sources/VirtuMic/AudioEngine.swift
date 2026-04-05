@@ -363,6 +363,8 @@ final class AudioEngine: ObservableObject {
     }
 
     private func stopEngines() {
+        restartWorkItem?.cancel()
+        restartWorkItem = nil
         isMonitoring = false
         if let listener = outputDeviceListener {
             DeviceManager.stopWatchingDefaultOutputDevice(listener)
