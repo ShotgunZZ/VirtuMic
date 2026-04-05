@@ -44,17 +44,21 @@ enum DeviceManager {
 
     static func findDevice(matching name: String, needsInput: Bool, needsOutput: Bool) throws -> AudioDevice {
         let devices = listDevices()
-        if let device = devices.first(where: {
-            $0.name.localizedCaseInsensitiveContains(name) &&
-            (!needsInput || $0.hasInput) &&
-            (!needsOutput || $0.hasOutput)
+        let relevant = devices.filter { (!needsInput || $0.hasInput) && (!needsOutput || $0.hasOutput) }
+
+        // Match by name if provided
+        if !name.isEmpty, let device = relevant.first(where: {
+            $0.name.localizedCaseInsensitiveContains(name)
         }) {
             return device
         }
 
-        let relevantNames = devices
-            .filter { (!needsInput || $0.hasInput) && (!needsOutput || $0.hasOutput) }
-            .map { $0.name }
+        // Fall back to first available device
+        if let device = relevant.first {
+            return device
+        }
+
+        let relevantNames = relevant.map { $0.name }
         throw DeviceError.deviceNotFound(name: name, available: relevantNames)
     }
 

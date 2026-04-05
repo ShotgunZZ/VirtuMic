@@ -214,7 +214,7 @@ struct AudioConfig: Codable {
 
     static var defaultConfig: AudioConfig {
         AudioConfig(
-            inputDevice: "fifine Microphone",
+            inputDevice: "",
             outputDevice: "BlackHole 2ch",
             sampleRate: 44100,
             noiseGate: NoiseGateConfig(enabled: true, thresholdDB: -40, attackTime: 0.002, releaseTime: 0.05, holdTime: 0.1),
