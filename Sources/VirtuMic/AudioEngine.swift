@@ -3,6 +3,7 @@ import CoreAudio
 import AudioToolbox
 import Combine
 import os
+import Atomics
 
 private let log = Logger(subsystem: "com.virtumic.app2", category: "engine")
 
@@ -20,9 +21,10 @@ final class AudioEngine: ObservableObject {
 
     private var ringBuffer: UnsafeMutablePointer<Float>?
     private let ringBufferFrames = 88200
-    private var writePos = 0
-    private var readPos = 0
-    private let bufferLock = NSLock()
+    private let writePos = ManagedAtomic<Int>(0)
+    private let readPos = ManagedAtomic<Int>(0)
+    private let atomicPeakLevel = ManagedAtomic<UInt32>(0)
+    private var levelTimer: Timer?
 
     private var noiseGateAU: NoiseGateAudioUnit?
     private var eqNode: AVAudioUnitEQ?
@@ -81,8 +83,9 @@ final class AudioEngine: ObservableObject {
         setbuf(stdout, nil)
         inputEngine = AVAudioEngine()
         outputEngine = AVAudioEngine()
-        writePos = 0
-        readPos = 0
+        writePos.store(0, ordering: .relaxed)
+        readPos.store(0, ordering: .relaxed)
+        atomicPeakLevel.store(Float(-60).bitPattern, ordering: .relaxed)
 
         let inputDevice = try DeviceManager.findDevice(matching: config.inputDevice, needsInput: true, needsOutput: false)
         let outputDevice = try DeviceManager.findDevice(matching: config.outputDevice, needsInput: false, needsOutput: true)
@@ -169,9 +172,10 @@ final class AudioEngine: ObservableObject {
         // This gives full-volume processed audio for the ring buffer and level meter
         let ringBuf = ringBuffer!
         let ringSize = ringBufferFrames
-        let lock = bufferLock
         let numChannels = channels
-        let engine = self
+        let atomicWP = writePos
+        let atomicRP = readPos
+        let atomicPeak = atomicPeakLevel
 
         var tapCount = 0
         lastNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
@@ -180,70 +184,102 @@ final class AudioEngine: ObservableObject {
 
             tapCount += 1
             if tapCount <= 5 || tapCount % 100 == 0 {
-                // Check if audio data is non-zero
                 var maxSample: Float = 0
                 for i in 0..<frames { maxSample = max(maxSample, fabsf(channelData[0][i])) }
-                log.info("[VirtuMic] Tap #\(tapCount): frames=\(frames), maxSample=\(maxSample), writePos=\(engine.writePos)")
+                log.info("[VirtuMic] Tap #\(tapCount): frames=\(frames), maxSample=\(maxSample), writePos=\(atomicWP.load(ordering: .relaxed))")
             }
 
+            // Level metering — atomic store, zero allocations
             var maxLevel: Float = 0
             for i in 0..<frames {
                 let level = fabsf(channelData[0][i])
                 if level > maxLevel { maxLevel = level }
             }
-            let db = maxLevel > 0 ? 20 * log10f(maxLevel) : -60
-            DispatchQueue.main.async {
-                engine.inputLevel = db
-            }
+            let db = maxLevel > 0 ? 20 * log10f(maxLevel) : Float(-60)
+            atomicPeak.store(db.bitPattern, ordering: .relaxed)
 
+            // Lock-free write to ring buffer
             let tapChannels = min(Int(buffer.format.channelCount), numChannels)
-            lock.lock()
+            var wp = atomicWP.load(ordering: .relaxed)
             for i in 0..<frames {
                 for ch in 0..<numChannels {
-                    ringBuf[engine.writePos * numChannels + ch] = channelData[min(ch, tapChannels - 1)][i]
+                    ringBuf[wp * numChannels + ch] = channelData[min(ch, tapChannels - 1)][i]
                 }
-                engine.writePos = (engine.writePos + 1) % ringSize
+                wp = (wp + 1) % ringSize
             }
-            lock.unlock()
+            atomicWP.store(wp, ordering: .releasing)
         }
 
-        // Output engine
+        // Output engine — lock-free reader with underrun smoothing
         let outputFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: UInt32(channels))!
 
         var srcCount = 0
+        var lastSamples = [Float](repeating: 0, count: numChannels)
+        var fadeGain: Float = 0
+        var preFilled = false
+        let preFillThreshold = 4410  // ~92ms at 48kHz — 1 tap buffer worth of headroom
+
         let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let frames = Int(frameCount)
 
-            lock.lock()
-            let preReadPos = engine.readPos
-            let preWritePos = engine.writePos
-            for buffer in ablPointer {
-                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                let bufChannels = Int(buffer.mNumberChannels)
-                for i in 0..<frames {
-                    for ch in 0..<bufChannels {
-                        if engine.readPos != engine.writePos {
-                            data[i * bufChannels + ch] = ringBuf[engine.readPos * numChannels + min(ch, numChannels - 1)]
-                        } else {
-                            data[i * bufChannels + ch] = 0
+            let wp = atomicWP.load(ordering: .acquiring)
+            var rp = atomicRP.load(ordering: .relaxed)
+            let preReadPos = rp
+
+            // Wait for ring buffer to pre-fill before reading
+            if !preFilled {
+                let available = (wp - rp + ringSize) % ringSize
+                if available < preFillThreshold {
+                    // Output silence until we have enough headroom
+                    for buffer in ablPointer {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let total = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                        for i in 0..<total { data[i] = 0 }
+                    }
+                    return noErr
+                }
+                preFilled = true
+                log.info("[VirtuMic] Pre-fill complete, starting playback with \(available) frames buffered")
+            }
+
+            // Frames outer loop, buffers inner — advance rp once per frame, not per channel
+            for i in 0..<frames {
+                if rp != wp {
+                    // Data available — read from ring buffer
+                    for (bufIdx, buffer) in ablPointer.enumerated() {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let bufChannels = Int(buffer.mNumberChannels)
+                        for ch in 0..<bufChannels {
+                            let ringCh = min(bufIdx * bufChannels + ch, numChannels - 1)
+                            data[i * bufChannels + ch] = ringBuf[rp * numChannels + ringCh]
+                            lastSamples[ringCh] = ringBuf[rp * numChannels + ringCh]
                         }
                     }
-                    if engine.readPos != engine.writePos {
-                        engine.readPos = (engine.readPos + 1) % ringSize
+                    rp = (rp + 1) % ringSize
+                    fadeGain = 1.0
+                } else {
+                    // Underrun — smooth fade-out from last sample
+                    fadeGain *= 0.95
+                    for buffer in ablPointer {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let bufChannels = Int(buffer.mNumberChannels)
+                        for ch in 0..<bufChannels {
+                            data[i * bufChannels + ch] = lastSamples[min(ch, numChannels - 1)] * fadeGain
+                        }
                     }
                 }
             }
-            lock.unlock()
+
+            atomicRP.store(rp, ordering: .releasing)
 
             srcCount += 1
             if srcCount <= 5 || srcCount % 100 == 0 {
-                // Check first sample of output
                 var outMax: Float = 0
                 if let firstBuf = ablPointer.first, let d = firstBuf.mData?.assumingMemoryBound(to: Float.self) {
                     for i in 0..<frames { outMax = max(outMax, fabsf(d[i])) }
                 }
-                log.info("[VirtuMic] Src #\(srcCount): frames=\(frames), readPos=\(preReadPos)→\(engine.readPos), writePos=\(preWritePos), outMax=\(outMax)")
+                log.info("[VirtuMic] Src #\(srcCount): frames=\(frames), readPos=\(preReadPos)→\(rp), writePos=\(wp), outMax=\(outMax)")
             }
 
             return noErr
@@ -255,6 +291,13 @@ final class AudioEngine: ObservableObject {
         try inputEngine.start()
         try outputEngine.start()
         log.info("[VirtuMic] Both engines started successfully!")
+
+        // Poll atomic peak level from main thread (no allocation on audio thread)
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let bits = self.atomicPeakLevel.load(ordering: .relaxed)
+            self.inputLevel = Float(bitPattern: bits)
+        }
     }
 
 
@@ -278,6 +321,8 @@ final class AudioEngine: ObservableObject {
         eqNode = nil
         compressorNode = nil
         lastProcessingNode = nil
+        levelTimer?.invalidate()
+        levelTimer = nil
         if let buf = ringBuffer {
             buf.deallocate()
             ringBuffer = nil
