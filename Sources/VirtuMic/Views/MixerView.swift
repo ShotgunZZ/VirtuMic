@@ -12,6 +12,7 @@ struct MixerView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 8) {
+                    DevicePickerView(engine: engine)
                     NoiseGateView(engine: engine)
                     EqualizerView(engine: engine)
                     CompressorView(engine: engine)
