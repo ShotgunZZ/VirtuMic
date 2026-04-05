@@ -216,6 +216,8 @@ final class AudioEngine: ObservableObject {
         var srcCount = 0
         var lastSamples = [Float](repeating: 0, count: numChannels)
         var fadeGain: Float = 0
+        var preFilled = false
+        let preFillThreshold = 4410  // ~92ms at 48kHz — 1 tap buffer worth of headroom
 
         let sourceNode = AVAudioSourceNode(format: outputFormat) { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
@@ -225,22 +227,43 @@ final class AudioEngine: ObservableObject {
             var rp = atomicRP.load(ordering: .relaxed)
             let preReadPos = rp
 
-            for buffer in ablPointer {
-                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                let bufChannels = Int(buffer.mNumberChannels)
-                for i in 0..<frames {
-                    if rp != wp {
-                        // Data available — read from ring buffer
+            // Wait for ring buffer to pre-fill before reading
+            if !preFilled {
+                let available = (wp - rp + ringSize) % ringSize
+                if available < preFillThreshold {
+                    // Output silence until we have enough headroom
+                    for buffer in ablPointer {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let total = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                        for i in 0..<total { data[i] = 0 }
+                    }
+                    return noErr
+                }
+                preFilled = true
+                log.info("[VirtuMic] Pre-fill complete, starting playback with \(available) frames buffered")
+            }
+
+            // Frames outer loop, buffers inner — advance rp once per frame, not per channel
+            for i in 0..<frames {
+                if rp != wp {
+                    // Data available — read from ring buffer
+                    for (bufIdx, buffer) in ablPointer.enumerated() {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let bufChannels = Int(buffer.mNumberChannels)
                         for ch in 0..<bufChannels {
-                            let sample = ringBuf[rp * numChannels + min(ch, numChannels - 1)]
-                            data[i * bufChannels + ch] = sample
-                            lastSamples[min(ch, numChannels - 1)] = sample
+                            let ringCh = min(bufIdx * bufChannels + ch, numChannels - 1)
+                            data[i * bufChannels + ch] = ringBuf[rp * numChannels + ringCh]
+                            lastSamples[ringCh] = ringBuf[rp * numChannels + ringCh]
                         }
-                        rp = (rp + 1) % ringSize
-                        fadeGain = 1.0
-                    } else {
-                        // Underrun — smooth fade-out from last sample
-                        fadeGain *= 0.95
+                    }
+                    rp = (rp + 1) % ringSize
+                    fadeGain = 1.0
+                } else {
+                    // Underrun — smooth fade-out from last sample
+                    fadeGain *= 0.95
+                    for buffer in ablPointer {
+                        guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                        let bufChannels = Int(buffer.mNumberChannels)
                         for ch in 0..<bufChannels {
                             data[i * bufChannels + ch] = lastSamples[min(ch, numChannels - 1)] * fadeGain
                         }
