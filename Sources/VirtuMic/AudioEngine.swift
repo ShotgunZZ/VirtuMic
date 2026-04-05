@@ -79,6 +79,30 @@ final class AudioEngine: ObservableObject {
         }
     }
 
+    // MARK: - Device Selection
+
+    func availableDevices() -> [AudioDevice] {
+        DeviceManager.listDevices()
+    }
+
+    func setInputDevice(_ name: String) {
+        config.inputDevice = name
+        scheduleSave()
+        if isRunning {
+            stop()
+            start()
+        }
+    }
+
+    func setOutputDevice(_ name: String) {
+        config.outputDevice = name
+        scheduleSave()
+        if isRunning {
+            stop()
+            start()
+        }
+    }
+
     private func startEngines() throws {
         setbuf(stdout, nil)
         inputEngine = AVAudioEngine()
