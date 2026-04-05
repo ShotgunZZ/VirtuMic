@@ -66,15 +66,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func updateIcon() {
         if let button = statusItem?.button {
-            let imageName = engine?.isRunning == true ? "mic.fill" : "mic.slash.fill"
-            button.image = NSImage(systemSymbolName: imageName, accessibilityDescription: "VirtuMic")
-            // Tint: green when running, default when stopped
-            if engine?.isRunning == true {
-                button.contentTintColor = .systemGreen
-            } else {
-                button.contentTintColor = .secondaryLabelColor
-            }
+            let running = engine?.isRunning == true
+            button.image = makeMenuBarIcon(running: running)
         }
+    }
+
+    func makeMenuBarIcon(running: Bool) -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let cyan = NSColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 1.0)
+            let dim = NSColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.35)
+            let color = running ? cyan : dim
+
+            color.setStroke()
+
+            let lw: CGFloat = 1.5
+
+            // Mic capsule (hollow rounded rect)
+            let capsule = NSBezierPath(roundedRect: NSRect(x: 5.5, y: 7, width: 7, height: 10), xRadius: 3.5, yRadius: 3.5)
+            capsule.lineWidth = lw
+            capsule.stroke()
+
+            // Cradle arc
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: NSPoint(x: 9, y: 7), radius: 6.5, startAngle: 180, endAngle: 0, clockwise: true)
+            arc.lineWidth = lw
+            arc.stroke()
+
+            // Stand
+            let stand = NSBezierPath()
+            stand.move(to: NSPoint(x: 9, y: 0.5))
+            stand.line(to: NSPoint(x: 9, y: 3))
+            stand.lineWidth = lw
+            stand.lineCapStyle = .round
+            stand.stroke()
+
+            // Base
+            let base = NSBezierPath()
+            base.move(to: NSPoint(x: 5.5, y: 0.5))
+            base.line(to: NSPoint(x: 12.5, y: 0.5))
+            base.lineWidth = lw
+            base.lineCapStyle = .round
+            base.stroke()
+
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     func updateMenu() {

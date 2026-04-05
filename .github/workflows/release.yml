@@ -47,6 +47,8 @@ jobs:
             <string>13.0</string>
             <key>LSUIElement</key>
             <true/>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
             <key>NSMicrophoneUsageDescription</key>
             <string>VirtuMic needs microphone access to process your audio input.</string>
           </dict>
@@ -57,6 +59,9 @@ jobs:
 
           cp scripts/setup.sh VirtuMic.app/Contents/MacOS/setup.sh
           chmod +x VirtuMic.app/Contents/MacOS/setup.sh
+
+          mkdir -p VirtuMic.app/Contents/Resources
+          cp Resources/AppIcon.icns VirtuMic.app/Contents/Resources/AppIcon.icns
 
       - name: Create zip
         run: |
